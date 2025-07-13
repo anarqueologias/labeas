@@ -2,7 +2,7 @@
 
 ## Orientações sobre uso de IAG no GAS, nas atividades acadêmicas, nos projetos em desenvolvimento e na divulgação científica do grupo e de seus integrantes
 
-Consideramos que estas orientações, diretrizes e procedimentos devem permanecer em constante revisão e podem ser objeto de atualizações periódicas, considerando as condições efetivas de desenvolvimento das pesquisas e as frequentes atualizações das tecnologias de IAG, entre outros fatores. Para consultar o histórico de versões, acesse o arquivo "IAGnoGAS.md", disponível em: https://github.com/anarqueologias/labeas/.
+Consideramos que estas orientações, diretrizes e procedimentos devem permanecer em constante revisão e podem ser objeto de atualizações periódicas, em função das condições efetivas de desenvolvimento das pesquisas e as frequentes atualizações das tecnologias de IAG, entre outros fatores. Para consultar o histórico de versões, acesse o arquivo "IAGnoGAS.md", disponível em: https://github.com/anarqueologias/labeas/.
 
 ### Princípios gerais
 
@@ -10,8 +10,6 @@ Consideramos que estas orientações, diretrizes e procedimentos devem permanece
 2. Legalidade
 3. Ética
 4. Acesso à informação
-
-Além dos princípios básicos indicados, consideramos que estas orientações, diretrizes e procedimentos devem permanecer em constante revisão e podem ser objeto de atualizações periódicas, considerando as condições efetivas de desenvolvimento das pesquisas e as frequentes atualizações das tecnologias de IAG, entre outros fatores.
 
 ### Protocolo básico: informar sobre uso de IAG
 
