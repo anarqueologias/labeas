@@ -82,8 +82,135 @@
     const download=(blob,name)=>{const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=name;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),1000)};
     field('copy').addEventListener('click',async()=>{const text=getDeclaration();try{await navigator.clipboard.writeText(text)}catch{field('output').select();document.execCommand('copy')}field('copied').textContent='Texto copiado.'});
     field('word').addEventListener('click',()=>{const text=getDeclaration();const html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Declaração de uso de IAG</title><style>@page WordSection1{size:21cm 29.7cm;margin:3cm 2cm 2cm 3cm}div.WordSection1{page:WordSection1}body{margin:0;color:#000}p{mso-line-height-rule:auto}</style></head><body><div class="WordSection1">'+academicBody(text)+'</div></body></html>';download(new Blob(['\ufeff',html],{type:'application/msword;charset=utf-8'}),filename()+'.doc');field('copied').textContent='Arquivo Word baixado.'});
-    const loadPdfExporter=()=>new Promise((resolve,reject)=>{if(typeof html2pdf==='function'){resolve();return}const script=document.createElement('script');script.src='https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';script.integrity='sha384-Yv5O+t3uE3hunW8uyrbpPW3iw6/5/Y7HitWJBLgqfMoA36NogMmy+8wWZMpn3HWc';script.crossOrigin='anonymous';script.onload=()=>typeof html2pdf==='function'?resolve():reject();script.onerror=reject;document.head.appendChild(script)});
-    field('pdf').addEventListener('click',async()=>{const text=getDeclaration();field('copied').textContent='Preparando PDF...';field('pdf').disabled=true;try{await loadPdfExporter();const preview=field('academic-preview');preview.innerHTML=academicBody(text);await new Promise(resolve=>requestAnimationFrame(resolve));await html2pdf().set({margin:[30,20,20,30],filename:filename()+'.pdf',pagebreak:{mode:['css','legacy']},image:{type:'jpeg',quality:.98},html2canvas:{scale:2,backgroundColor:'#ffffff',useCORS:true},jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}}).from(preview).save();field('copied').textContent='PDF baixado.'}catch{field('copied').textContent='Não foi possível gerar o PDF. Verifique sua conexão e tente novamente.'}finally{field('pdf').disabled=false}});
+    // Renderiza cada página diretamente em Arial; não captura o DOM nem cria
+    // um canvas do tamanho do documento inteiro (causa de PDFs em branco).
+    const renderAcademicPdfPages=text=>{
+      if(!text.trim())throw new Error('Gere a declaração antes de baixar o PDF.');
+      const canvas=document.createElement('canvas');
+      canvas.width=Math.round(210*192/25.4);
+      const pxPerMm=canvas.width/210;
+      canvas.height=Math.round(297*pxPerMm);
+      const ctx=canvas.getContext('2d');
+      if(!ctx)throw new Error('O navegador não disponibilizou a renderização de texto.');
+      const fontSize=12*25.4/72*pxPerMm,lineHeight=fontSize*1.5;
+      const left=30*pxPerMm,right=190*pxPerMm,top=30*pxPerMm;
+      const bottom=277*pxPerMm,indent=12.5*pxPerMm;
+      const pages=[],blocks=text.replace(/\r\n?/g,'\n').trim().split(/\n\s*\n/);
+      let y=top,painted=false;
+      const resetPage=()=>{
+        ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle='#000';ctx.textBaseline='alphabetic';
+        ctx.font=fontSize+'px Arial, sans-serif';y=top;painted=false;
+      };
+      const finishPage=()=>{
+        if(!painted)return;
+        const encoded=canvas.toDataURL('image/jpeg',.98).split(',')[1];
+        const binary=atob(encoded);
+        pages.push({width:canvas.width,height:canvas.height,bytes:Uint8Array.from(binary,char=>char.charCodeAt(0))});
+        resetPage();
+      };
+      const wrapLines=(block,firstIndent=0)=>{
+        const lines=[];
+        block.split('\n').forEach(segment=>{
+          const words=segment.trim().split(/\s+/u).filter(Boolean);
+          let line='';
+          const limit=()=>right-left-(lines.length===0?firstIndent:0);
+          const emit=justify=>{lines.push({text:line,justify});line='';};
+          words.forEach(word=>{
+            const candidate=line?line+' '+word:word;
+            if(ctx.measureText(candidate).width<=limit()){line=candidate;return;}
+            if(line)emit(true);
+            let piece='';
+            Array.from(word).forEach(char=>{
+              if(piece&&ctx.measureText(piece+char).width>limit()){
+                line=piece;emit(true);piece='';
+              }
+              piece+=char;
+            });
+            line=piece;
+          });
+          if(line)emit(false);
+          else if(!words.length)lines.push({text:'',justify:false});
+        });
+        return lines;
+      };
+      const drawLine=(line,x,width,center=false)=>{
+        if(y+lineHeight>bottom)finishPage();
+        const words=line.text.split(' ');
+        if(center){
+          ctx.fillText(line.text,left+(right-left-ctx.measureText(line.text).width)/2,y+fontSize);
+        }else if(line.justify&&words.length>1){
+          const wordsWidth=words.reduce((sum,word)=>sum+ctx.measureText(word).width,0);
+          const gap=(width-wordsWidth)/(words.length-1);
+          let position=x;
+          words.forEach(word=>{ctx.fillText(word,position,y+fontSize);position+=ctx.measureText(word).width+gap;});
+        }else{
+          ctx.fillText(line.text,x,y+fontSize);
+        }
+        y+=lineHeight;painted=painted||Boolean(line.text);
+      };
+      resetPage();
+      ctx.font='bold '+fontSize+'px Arial, sans-serif';
+      wrapLines(blocks.shift()).forEach(line=>drawLine(line,left,right-left,true));
+      y+=18*25.4/72*pxPerMm;
+      ctx.font=fontSize+'px Arial, sans-serif';
+      blocks.forEach(block=>{
+        const lines=wrapLines(block,indent);
+        lines.forEach((line,index)=>{
+          // Evita deixar uma única linha isolada na mudança de página.
+          const remaining=lines.length-index;
+          const slots=Math.floor((bottom-y)/lineHeight);
+          if((index===0&&remaining>1&&slots<2)||(remaining===2&&slots===1))finishPage();
+          const inset=index===0?indent:0;
+          drawLine(line,left+inset,right-left-inset);
+        });
+      });
+      finishPage();
+      canvas.width=canvas.height=0;
+      return pages;
+    };
+    const buildAcademicPdf=text=>{
+      const pages=renderAcademicPdfPages(text),encoder=new TextEncoder();
+      const chunks=[],offsets=[0];let length=0;
+      const append=data=>{const bytes=typeof data==='string'?encoder.encode(data):data;chunks.push(bytes);length+=bytes.length;};
+      const object=(id,body,stream)=>{
+        offsets[id]=length;append(id+' 0 obj\n');
+        if(stream){append(body+'\nstream\n');append(stream);append('\nendstream\n');}
+        else append(body+'\n');
+        append('endobj\n');
+      };
+      append('%PDF-1.4\n%LABEAS\n');
+      object(1,'<< /Type /Catalog /Pages 2 0 R >>');
+      const kids=pages.map((_,index)=>(3+index*3)+' 0 R').join(' ');
+      object(2,'<< /Type /Pages /Count '+pages.length+' /Kids ['+kids+'] >>');
+      const pageWidth=210*72/25.4,pageHeight=297*72/25.4;
+      pages.forEach((page,index)=>{
+        const id=3+index*3;
+        object(id,'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+pageWidth+' '+pageHeight+'] /Resources << /XObject << /PageImage '+(id+1)+' 0 R >> >> /Contents '+(id+2)+' 0 R >>');
+        object(id+1,'<< /Type /XObject /Subtype /Image /Width '+page.width+' /Height '+page.height+' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+page.bytes.length+' >>',page.bytes);
+        const commands=encoder.encode('q\n'+pageWidth+' 0 0 '+pageHeight+' 0 0 cm\n/PageImage Do\nQ\n');
+        object(id+2,'<< /Length '+commands.length+' >>',commands);
+      });
+      const startXref=length,count=3+pages.length*3;
+      append('xref\n0 '+count+'\n0000000000 65535 f \n');
+      for(let id=1;id<count;id++)append(String(offsets[id]).padStart(10,'0')+' 00000 n \n');
+      append('trailer\n<< /Size '+count+' /Root 1 0 R >>\nstartxref\n'+startXref+'\n%%EOF\n');
+      return new Blob(chunks,{type:'application/pdf'});
+    };
+    field('pdf').addEventListener('click',async()=>{
+      const text=getDeclaration();
+      if(!text.trim()){field('copied').textContent='Gere a declaração antes de baixar o PDF.';return;}
+      field('copied').textContent='Preparando PDF...';field('pdf').disabled=true;
+      try{
+        if(document.fonts&&document.fonts.ready)await document.fonts.ready;
+        const blob=buildAcademicPdf(text);
+        download(blob,filename()+'.pdf');
+        field('copied').textContent='PDF baixado.';
+      }catch(error){
+        console.error('Falha ao gerar o PDF da declaração:',error);
+        field('copied').textContent='Não foi possível gerar o PDF. Tente novamente em um navegador atualizado.';
+      }finally{field('pdf').disabled=false;}
+    });
     const loadSpreadsheetExporter=()=>new Promise((resolve,reject)=>{if(typeof XLSX!=='undefined'){resolve();return}const script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';script.integrity='sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw';script.crossOrigin='anonymous';script.onload=()=>typeof XLSX!=='undefined'?resolve():reject();script.onerror=reject;document.head.appendChild(script)});
     const safeSheetCell=input=>{const text=String(input??'');return /^[=+\-@]/.test(text)?"'"+text:text};
     const spreadsheetRows=()=>{const activities=[...document.querySelectorAll('input[type="checkbox"]:checked')].map(input=>input.value).join('; ')||'Não informado';return collectUses().map((use,index)=>({'Nº do registro':index+1,'Pessoa(s) responsável(eis)':value('who'),'Trabalho ou atividade':value('context'),'Contexto, processo ou etapa':use.stage,'Ferramenta e versão':use.tool,'Empresa ou organização responsável':use.developer,'Data e hora do uso':use.date,'Tipo de uso':use.type,'Atividades realizadas com IAG':activities,'Procedimento geral e revisão humana':value('detail'),'Prompts e respostas obtidas':use.prompts,'Capítulos, seções ou trechos afetados':use.sections,'Quantidade de palavras, caracteres e/ou imagens geradas':use.quantity,'Observações':use.notes||'Não informado'})).map(row=>Object.fromEntries(Object.entries(row).map(([key,item])=>[key,safeSheetCell(item)])))};
